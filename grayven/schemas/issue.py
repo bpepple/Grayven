@@ -131,7 +131,7 @@ class Issue(BasicIssue):
 
     barcode: str
     brand: str
-    cover: HttpUrl
+    cover: Annotated[Optional[HttpUrl], BeforeValidator(blank_is_none)]
     editing: str
     indicia_frequency: str
     indicia_publisher: str
