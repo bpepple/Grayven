@@ -8,12 +8,12 @@ __all__ = ["GrandComicsDatabase"]
 
 import platform
 from json import JSONDecodeError
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 from urllib.parse import urlencode
 
 from httpx import HTTPStatusError, RequestError, TimeoutException, get
 from pydantic import TypeAdapter, ValidationError
-from ratelimit import limits, sleep_and_retry
+from pyrate_limiter import Duration, InMemoryBucket, Limiter, Rate
 
 from grayven import __version__
 from grayven.exceptions import ServiceError
@@ -22,7 +22,11 @@ from grayven.schemas.publisher import Publisher
 from grayven.schemas.series import Series
 from grayven.sqlite_cache import SQLiteCache
 
-MINUTE = 60
+MINUTE_IN_MILLISECONDS = 60000
+
+
+def rate_mapping(*args: any, **kwargs: any) -> tuple[str, int]:
+    return "gcd", 1
 
 
 class GrandComicsDatabase:
@@ -37,6 +41,14 @@ class GrandComicsDatabase:
 
     API_URL = "https://www.comics.org/api"
 
+    daily_rate = Rate(2000, Duration.DAY)
+    minute_rate = Rate(4, Duration.MINUTE)
+    seconds_rate = Rate(1, Duration.SECOND * 4)
+    rates: ClassVar[list[Rate]] = [seconds_rate, minute_rate, daily_rate]
+    bucket = InMemoryBucket(rates)
+    limiter = Limiter(bucket, raise_when_fail=False, max_delay=MINUTE_IN_MILLISECONDS)
+    decorator = limiter.as_decorator()
+
     def __init__(
         self, email: str, password: str, timeout: int = 30, cache: Optional[SQLiteCache] = None
     ):
@@ -49,8 +61,7 @@ class GrandComicsDatabase:
         self.timeout = timeout
         self.cache = cache
 
-    @sleep_and_retry
-    @limits(calls=20, period=MINUTE)
+    @decorator(rate_mapping)
     def _perform_get_request(
         self, url: str, params: Optional[dict[str, str]] = None
     ) -> dict[str, Any]:
